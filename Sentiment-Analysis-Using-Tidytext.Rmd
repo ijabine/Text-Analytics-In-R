@@ -1,5 +1,5 @@
 ---
-title: "Sentiment Analysis using tidytext package"
+title: "Sentiment Analysis Using tidytext Package"
 author: "Illarion Jabine"
 date: "18/12/2019"
 output: html_document
@@ -9,247 +9,181 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+### Required packages:
+
+* [tidyverse]
+* [tidytext]
+* [textdata]
+* [wordcloud]
+* [tokenizers]
+
+## Introduction
 
 
-# Wrangling Text 
-Since text is unstructured data, a certain amount of wrangling is required to get it into a form where you can analyze it. In this chapter, you will learn how to add structure to text by tokenizing, cleaning, and treating text as categorical data.
-```{r}
+## 1. Loading raw text and some preliminary analysis. 
+Text is unstructured data, and therefor a certain amount of text wrangling is required to get it into a form ready for analysis. We can add structure to text by tokenizing, cleaning, and treating text as categorical data.
+
+Let's first load the libraries. In this exercise I will use the text mining package tidytext, although there are plenty of other text analytics packages available: tm, quanteda, text2vec, etc. The creators of tidytext package claim that this package follow the principles of the tidy data. See <https://en.wikipedia.org/wiki/Tidy_data>
+
+```{r loading packages}
 # Load the tidyverse packages
 library(tidyverse)
-twitter_data <- readRDS("D:/R Projects/Text Analytics/twitter_data.rds")
+library(tidytext)
+library(textdata)
+library(wordcloud)
+
+```
+
+Now we will read twitter data from RDS file:
+```{r}
+twitter_data <- readRDS("data/twitter_data.rds")
+
 # Print twitter_data
 print(twitter_data)
 
-# Print just the complaints in twitter_data
-twitter_data %>% 
-  filter(complaint_label == "Complaint")
-
-
-# Start with the data frame
-twitter_data %>% 
-  # Group the data by whether or not the tweet is a complaint
-  group_by(complaint_label) %>% 
-  # Compute the mean, min, and max follower counts
-  summarize(
-    avg_followers = mean(usr_followers_count),
-    min_followers = min(usr_followers_count),
-    max_followers = max(usr_followers_count)
-  )
-
+str(twitter_data)
 
 
 ```
 
-Counts are the essential summary for categorical data. Since text is categorical, it's important to get comfortable computing counts. The twitter_data is composed of complaints and non-complaints, as indicated by the complaint_label column, and also includes a column indicating whether or not the user is verified (i.e., they have been confirmed by Twitter to be who they say they are) called usr_verified. Note that column is of type <lgl>, meaning logical. Do verified users complain more?
-
-```{r}
+I can assume that this data were harvested (scrapped) from twitter using twitteR package. The twitter_data is composed of tweet text stored in the column tweet_text. The purpose of this dataset is to preform the sentiment analysis. 
+Each tweet is labeled with  complaints and non-complaints, as indicated by the complaint_label column, and also includes columns indicating whether or not the user is verified called "usr_verified" and the count of user followers (usr_followers_count). 
+Since text is categorical, counts are the essential summary for categorical data. 
+By using already available data in complaint_label and usr_verified variables we can perform some discriptive analysis: 
+```{r some descriptive analysis}
 twitter_data %>% 
-  # Filter for just the complaints
-  filter(complaint_label == "Complaint") %>% 
-  # Count the number of verified and non-verified users
-  count(usr_verified)
+  # Count the number of verified/non-verified users and complaint/non-complaint
+  count(complaint_label,usr_verified) %>%
+  ggplot(aes(x= complaint_label,y=n,fill=usr_verified)) +
+  geom_col(position = "stack") +
+  labs(x = "Complaint: Y / N",
+       y = "Count") +
+  # Legend title and labels can be controlled with scale_fill_discrete():
+  scale_fill_discrete(name="User Verified:\n No or Yes",
+                      labels=c("No", "Yes"))
 
 
 ```
 
 
-Summarizing user types
+## 2. Text Preprocessing
 
+We have prepared our input datasets with raw textual data.
+Now we are ready to transform it into the format required for text analytics. This transformation process has several steps:
+ 1. Tokenization
+ 2. Creation of DFM: document-frequency matrix (aka document-term matrix)
 
-Since you can use the count() wrapper, why bother counting rows in a group as part of a grouped summary? Sometimes you want a more detailed summary, and knowing how to compute a count as part of a grouped summary that mixes numeric and categorical summaries can come in handy.
+### 2.1 Tokenization
 
-```{r}
-twitter_data %>% 
-  # Group by whether or not a user is verified
-  group_by(usr_verified) %>% 
-  summarize(
-    # Compute the average number of followers
-    avg_followers = mean(usr_followers_count),
-    # Count the number of users in each category
-    n = n()
-  )
+Tokenization is a process of converting natural language text into tokens (or terms). Tokens can be shingle n-grams, skip n-grams, words, word stems, sentences, paragraphs, characters, shingled characters, lines, tweets.
+To tokenize I will use unnest_tokens() function from tidytext package. 
+This function  uses the tokenizers package, splitting the table into one-token-per-row, i.e. one row per word:
 
-library(tidyverse)
-library(tidytext)
+```{r tokenization}
 
-tidy_twitter <- twitter_data %>% 
+twitter_dfm <- twitter_data %>% 
   # Tokenize the twitter data
   unnest_tokens(word, tweet_text) 
 
-tidy_twitter %>% 
+twitter_dfm %>% 
   # Compute word counts
   count(word) %>% 
   # Arrange the counts in descending order
   arrange(desc(n))
 
-
 ```
 
-
-Cleaning and counting
-
-
-Remove stop words to explore the content of just the airline tweets classified as complaints in twitter_data.
-•Tokenize the tweets in twitter_data. Name the column with tokenized words as word. 
-•Remove the default stop words from the tokenized twitter_data.
-•Filter to keep the complaints only.
-•Compute word counts using the tokenized, cleaned text and arrange in descending order by count.
-
+It looks like unnest_tokens() has also done some text pre-processing. Compare the first tweet as a raw text and in tokenized format:
 ```{r}
-tidy_twitter <- twitter_data %>% 
+print(twitter_data$tweet_text[1])
+view(twitter_dfm[1:25,])
+```
+It has made it lower case, removed punctuation, symbols and tags. However, I did not ask it to do this. 
+It seems to be controled by tokenize_words() function from tokenizers package:
+tokenize_words(x, lowercase = TRUE, stopwords = NULL, strip_punct = TRUE,
+  strip_numeric = FALSE, simplify = FALSE)
+If I used token() from quanteda package I could specify all these parameters:
+
+twitter_dfm_quanteda <- tokens(twitter_data$tweet_text, what = "word", 
+     remove_numbers = TRUE, 
+     remove_punct = TRUE, 
+     remove_symbols = TRUE, 
+     remove_hyphens = TRUE)
+
+### 3. Removing stop words
+
+The tokenized data still contain a lot of stop words (a, the, to, after,...) that do not add more meaning. 
+To remove them I will join twitter_data with stop_words lexicon from tidytext using anti_join from dplyr package.
+
+Note: anti_join(x,y) - return all rows from x where there are not matching values in y, keeping just columns from x.
+
+
+```{r removing stop words}
+twitter_dfm <- twitter_data %>% 
   # Tokenize the twitter data
   unnest_tokens(word, tweet_text) %>% 
   # Remove stop words
   anti_join(stop_words)
-
-tidy_twitter %>% 
-  # Filter to keep complaints only
-  filter(complaint_label == "Complaint") %>% 
-  # Compute word counts and arrange in descending order
-  count(word) %>% 
-  arrange(desc(n))
-```
-It looks like complaints include frequent references to time, delays, and service. However, there are simply a lot of specific airlines referenced. These could be considered as stop words specific to this data, and we'll see how to remove them in the next chapter.
-
-
-# Visualizing Text
-
-While counts are nice, visualizations are better. In this chapter, you will learn how to apply what you know from ggplot2 to tidy text data.
-
-Visualizing complaints
-
-
-We ended the last chapter with complaint word counts. Now let's visualize those word counts with a bar plot.
-
-The tidyverse and tidytext packages have been loaded. twitter_data has been tokenized and the standard stop words have been removed.
-
-```{r}
-word_counts <- tidy_twitter %>% 
-  filter(complaint_label == "Complaint") %>% 
-  count(word) %>% 
-  # Keep words with count greater than 100
-  filter(n > 100)
-
-# Create a bar plot using word_counts with x = word
-ggplot(word_counts, aes(x = word, y = n)) +
-  geom_col() +
-  # Flip the plot coordinates
-  coord_flip()
+  
 ```
 
 
-Visualizing non-complaints
+### 4. Visualizing Text
 
+Combining the power of dplyr and ggplot2 we can create various visualizations.
 
-Now let's visualize the word counts associated with non-complaints.
-```{r}
-word_counts <- tidy_twitter %>% 
-  # Only keep the non-complaints
+ 4.1 Non-complaints arranged in descending order by word count:
+```{r visualize the word counts associated with non-complaints}
+twitter_dfm %>% 
   filter(complaint_label == "Non-Complaint") %>% 
   count(word) %>% 
-  filter(n > 150)
-
-# Create a bar plot using the new word_counts
-ggplot(word_counts, aes(x = word, y = n)) +
-  geom_col() +
-  coord_flip() +
-  # Title the plot "Non-Complaint Word Counts"
-  ggtitle("Non-Complaint Word Counts")
-
-```
-
-We still have some terms that look like stop words specific to this application. Also, it would be nice to plot both of these side-by-side!
-
-
-Adding custom stop words
-
-
-We've seen a number of words in twitter_data that aren't informative and should be removed from your final list of words. In this exercise, you will add a few words to your custom_stop_words data frame .
-```{r}
-custom_stop_words <- tribble(
-  # Column names should match stop_words
-  ~word, ~lexicon,
-  # Add http, win, and t.co as custom stop words
-  "http", "CUSTOM",
-  "win", "CUSTOM",
-  "t.co", "CUSTOM"
-)
-
-# Bind the custom stop words to stop_words
-stop_words2 <- stop_words %>% 
-  bind_rows(custom_stop_words)
-```
-
-Visualizing word counts using factors
-
-
-I've added a number of other custom stop words (including the airline names) and tidied the data for you. Now you will create an improved visualization and plot the words arranged in descending order by word count.
-```{r}
-word_counts <- tidy_twitter %>% 
-  filter(complaint_label == "Non-Complaint") %>% 
-  count(word) %>% 
-  # Keep terms that occur more than 100 times
-  filter(n > 100) %>% 
+  # Keep terms that occur more than 170 times
+  filter(n > 170) %>% 
   # Reorder word as an ordered factor by word counts
-  mutate(word2 = fct_reorder(word, n))
-
+  mutate(word2 = fct_reorder(word, n)) %>%
 # Plot the new word column with type factor
-ggplot(word_counts, aes(x = word2, y = n)) +
+ggplot(aes(x = word2, y = n)) +
   geom_col() +
   coord_flip() +
-  ggtitle("Non-Complaint Word Counts")
+  labs(title="Non-Complaint Word Counts",
+       x = "Words",
+       y = "Count")
 ```
 
+It looks like non-complaints include frequent references to specific airlines. time, delays, and service. These could be considered as stop words specific to this data, and can be removed using custom stop words.
 
-Counting by product and reordering
-
-
-tidy_twitter has been tokenized and stop words, including custom stop words, have been removed. You would like to visualize the differences in word counts based on complaints and non-complaints.
-
-```{r}
-word_counts <- tidy_twitter %>%
+ 4.2 Visualizing word counts with facets:
+```{r facets}
+twitter_dfm %>%
   # Count words by whether or not its a complaint
   count(word, complaint_label) %>%
   # Group by whether or not its a complaint
   group_by(complaint_label) %>%
-  # Keep the top 20 words
+  # Keep the top 20 words, top_n() -convenient wrapper that uses filter() and min_rank() to select the top or bottom entries. 
   top_n(20, n) %>%
   # Ungroup before reordering word as a factor by the count
   ungroup() %>%
-  mutate(word2 = fct_reorder(word, n))
-```
-
-
-Visualizing word counts with facets
-
-
-The word_counts from the previous exercise have been loaded. Let's visualize the word counts for the Twitter data with separate facets for complaints and non-complaints.
-
-```{r}
-# Include a color aesthetic tied to whether or not its a complaint
-ggplot(word_counts, aes(x = word2, y = n, fill = complaint_label)) +
+  mutate(word2 = fct_reorder(word, n)) %>%
+  # Sending the result of these dplyr transformations to ggplot:
+  ggplot(aes(x = word2, y = n, fill = complaint_label)) +
   # Don't include the lengend for the column plot
   geom_col(show.legend = FALSE) +
   # Facet by whether or not its a complaint and make the y-axis free
   facet_wrap(~ complaint_label, scales = "free_y") +
   # Flip the coordinates and add a title: "Twitter Word Counts"
   coord_flip() +
-  ggtitle("Twitter Word Counts")
+  labs(title="Word Counts",
+       x = "Words",
+       y = "Count")
 ```
 
+ 4.3 Creating a word cloud
 
-Creating a word cloud
+Let's visualize word counts with word clouds. For that we will need to use wordcloud() from wordcloud package: 
+```{r word cloud}
 
-
-We've seen bar plots, now let's visualize word counts with word clouds! tidy_twitter has already been loaded, tokenized, and cleaned.
-
-```{r}
-# Load the wordcloud package
-library(wordcloud)
-
-# Compute word counts and assign to word_counts
-word_counts <- tidy_twitter %>% 
+# First compute word counts and assign to word_counts
+word_counts <- twitter_dfm %>% 
   count(word)
 
 wordcloud(
@@ -257,64 +191,89 @@ wordcloud(
   words = word_counts$word, 
   # Assign the count column to freq
   freq = word_counts$n,
-  max.words = 30
-)
-```
-
-Adding a splash of color
-
-
-What about just the complaints? And let's add some color. Red seems appropriate. The wordcloud package has been loaded along with tidy_twitter
-
-```{r}
-# Compute complaint word counts and assign to word_counts
-word_counts <- tidy_twitter %>% 
-  filter(complaint_label == "Complaint") %>% 
-  count(word)
-
-# Create a complaint word cloud of the top 50 terms, colored red
-wordcloud(
-  words = word_counts$word, 
-  freq = word_counts$n,
-  max.words = 50, 
+  max.words = 30,
   colors = "red"
 )
+
 ```
 
 
+### 5. Adding custom stop words
 
-# Sentiment Analysis
+A number of words in twitter_data are not informative and should be removed from DFM. Let'sl add a few words to custom_stop_words:
 
-While word counts and visualizations suggest something about the content, we can do more. In this chapter, we move beyond word counts alone to analyze the sentiment or emotional valence of text.
+```{r custom stop words}
+custom_stop_words <- tribble(
+  # Column names should match stop_words
+  ~word, ~lexicon,
+  # Add http, win, and t.co as custom stop words
+  "http", "CUSTOM",
+  "delta", "CUSTOM",
+  "united", "CUSTOM",
+  "klm", "CUSTOM",
+  "ryanair", "CUSTOM",
+  "jetblue", "CUSTOM"
+)
+# I use tribble() to create a tibble. 
+# tibble provides stricter checking and better formatting than the traditional data fram <http://tibble.tidyverse.org>
 
-Counting the NRC sentiments
+# Bind the custom stop words to stop_words (comes seeded with tidytext), I use bind_rows() from dplyr:
+stop_words2 <- bind_rows(custom_stop_words,stop_words)
 
+# Now we can use our custom stop_words2 list to remove them from twitter_data:
 
-The fourth dictionary included with the tidytext package is the nrc dictionary. Let's start our exploration with sentiment counts.
+twitter_dfm <- twitter_data %>% 
+  # Tokenize the twitter data
+  unnest_tokens(word, tweet_text) %>% 
+  # Remove stop words
+  anti_join(stop_words2)
 
-```{r}
-# Count the number of words associated with each sentiment in nrc
-library(textdata)
-get_sentiments("nrc") %>% 
-  count(sentiment) %>% 
-  # Arrange the counts in descending order
-  arrange(desc(n))
 ```
 
+### 6. Sentiment Analysis
 
-Visualizing the NRC sentiments
+We can go further and move beyond word counts (content of the text) to analyze the sentiment or emotional intent of words. 
+By performing sentiment analysis (or opinion mining)  we can infer whether a section of text is positive or negative. 
+Likewise, we can characterize text along other emothions like anger, joy, disgust.
 
+ 6.1 Sentiment lexicons
+There are four dictionaries or sentiment lexicons included with the tidytext package. All of these lexicons are based on single words or unigrams:
 
-We've seen how visualizations can give us a better idea of patterns in data than counts alone. Let's visualize the sentiments from the nrc dictionary. I've loaded the tidyverse and tidytext packages for you already.
+ * afinn: assigns scores from -5 to 5, with negative scores indicating negative sentiment and positive scores - positive sentiment
+ * bing: binary categories of positive and negative
+ * loughran: categorize words into constraining,litigious,negative,positive,superfluous,  uncertainty
+ * nrc: categorize words into positive, negative, anger, anticipation, disgust, fear, joy, sadness, surprise, and trust.
+Finding or building a sentiment dictionary that is context-specific would be ideal.
 
-```{r}
-# Pull in the nrc dictionary, count the sentiments and reorder them by count
-sentiment_counts <- get_sentiments("nrc") %>% 
+Let's pull in the sentiment dictionaries, save them as objects and visualize their content:
+```{r loading lexicons, message=FALSE, warning=FALSE}
+
+afinn_lex <- get_sentiments("afinn")
+bing_lex <- get_sentiments("bing")
+loughran_lex <- get_sentiments("loughran")
+nrc_lex <- get_sentiments("nrc")
+
+#Visualizing the loughran sentiments:
+loughran_lex %>%
   count(sentiment) %>% 
-  mutate(sentiment2 = fct_reorder(sentiment, n))
+  mutate(sentiment2 = fct_reorder(sentiment, n)) %>%
+  # Visualize sentiment_counts using the new sentiment factor column
+ggplot(aes(x = sentiment2, y = n)) +
+  geom_col() +
+  coord_flip() +
+  # Change the title to "Sentiment Counts in NRC", x-axis to "Sentiment", and y-axis to "Counts"
+  labs(
+    x = "Sentiment",
+    y = "Counts",
+    title = "Sentiment Counts in loughran"
+  )
 
-# Visualize sentiment_counts using the new sentiment factor column
-ggplot(sentiment_counts, aes(x = sentiment2, y = n)) +
+#Visualizing the NRC sentiments:
+nrc_lex %>%
+  count(sentiment) %>% 
+  mutate(sentiment2 = fct_reorder(sentiment, n)) %>%
+  # Visualize sentiment_counts using the new sentiment factor column
+ggplot(aes(x = sentiment2, y = n)) +
   geom_col() +
   coord_flip() +
   # Change the title to "Sentiment Counts in NRC", x-axis to "Sentiment", and y-axis to "Counts"
@@ -323,140 +282,100 @@ ggplot(sentiment_counts, aes(x = sentiment2, y = n)) +
     y = "Counts",
     title = "Sentiment Counts in NRC"
   )
+  
 ```
 
+ 6.2 Analyzing sentiments
 
-Counting sentiment
 
+Now when we have all lexicons at our disposal we can do sentiment analysis.
+Let's see what sort of sentiments are most prevalent in the harvested twitts.
+We will do it by joining the twitter_dfm dataset with lexicon dataset using inner_join
+and word column as a key.
 
-The tidy_twitter dataset has been loaded for you. Let's see what sort of sentiments are most prevalent in our Twitter data.
+```{r sentiment analysis}
+# Join twitter_dfm and the loughran sentiment dictionary using inner_join:
+twitter_sentiment_loughran <- inner_join(twitter_dfm,loughran_lex,by = "word")
 
-```{r}
-# Join tidy_twitter and the NRC sentiment dictionary
-sentiment_twitter <- tidy_twitter %>% 
-  inner_join(get_sentiments("nrc"))
+# Join twitter_dfm and the NRC sentiment dictionary using inner_join:
+twitter_sentiment_nrc <- inner_join(twitter_dfm,nrc_lex,by = "word")
 
-# Count the sentiments in sentiment_twitter
-sentiment_twitter %>% 
+# Join twitter_dfm and the afinn sentiment dictionary using inner_join:
+twitter_sentiment_affin <- inner_join(twitter_dfm,afinn_lex,by = "word")
+
+# Join twitter_dfm and the bing sentiment dictionary using inner_join:
+twitter_sentiment_bing <- inner_join(twitter_dfm,bing_lex,by = "word")
+
+# Count and compare the sentiments in twitter_sentiment_nrc and twitter_sentiment_loughran
+
+twitter_sentiment_nrc %>% 
   count(sentiment) %>% 
-  # Arrange the sentiment counts in descending order
-  arrange(desc(n))
+  inner_join(twitter_sentiment_loughran %>% 
+  count(sentiment),by="sentiment")
+
 ```
 
-Visualizing sentiment
 
+ 6.3 Visualizing sentiment
 
-Let's explore which words are associated with each sentiment in our Twitter data.
-•Inner join tidy_twitter to the NRC dictionary and filter for positive, fear, and trust.
-•Count by word and sentiment and keep only the top 10 of each sentiment.
-•Create a factor called word2 that has each word ordered by the count.
+Let's explore which words are associated with anger, fear, sadness and disgust sentiments in twitter_sentiment_nrc.
 
 ```{r}
-word_counts <- tidy_twitter %>% 
-  # Append the NRC dictionary and filter for positive, fear, and trust
-  inner_join(get_sentiments("nrc")) %>% 
-  filter(sentiment %in% c("positive", "fear", "trust")) %>%
-  # Count by word and sentiment and take the top 10 of each
+twitter_sentiment_nrc  %>% 
+  # Filter for anger, fear, sadness and disgust
+  filter(sentiment %in% c("anger", "fear", "sadness", "disgust")) %>%
+  # Count by word and sentiment and take the top 20 of each
   count(word, sentiment) %>% 
   group_by(sentiment) %>% 
-  top_n(10, n) %>% 
+  top_n(20, n) %>% 
   ungroup() %>% 
   # Create a factor called word2 that has each word ordered by the count
-  mutate(word2 = fct_reorder(word, n))
-```
-
-
-•Create a bar plot of the word counts colored by sentiment.
-•Create a separate facet for each sentiment with free axes.
-•Title the plot "Sentiment Word Counts" with "Words" for the x-axis.
-
-```{r}
-# Create a bar plot out of the word counts colored by sentiment
-ggplot(word_counts, aes(x = word2, y = n, fill = sentiment)) +
+  mutate(word2 = fct_reorder(word, n)) %>%
+  # Create a bar plot out of the word counts colored by sentiment
+ggplot(aes(x = word2, y = n, fill = sentiment)) +
   geom_col(show.legend = FALSE) +
   # Create a separate facet for each sentiment with free axes
   facet_wrap(~ sentiment, scales = "free") +
   coord_flip() +
-  # Title the plot "Sentiment Word Counts" with "Words" for the x-axis
   labs(
     x ="Words",
     title ="Sentiment Word Counts"
   )
+
 ```
-These word counts by sentiment illustrate a possible mismatch with this particular sentiment dictionary. For example, gate is listed under trust. Pay is listed under both trust and positive. Remember, our sentiment analysis is conditioned on the dictionary we use. It's a tall order, but finding or building a sentiment dictionary that is context-specific would be ideal. 
+
+These word counts by sentiment show a possible mismatch with this particular sentiment dictionary. The words are listed under different categories. Our sentiment analysis is conditioned on the dictionary. It would be ideal to find or build a sentiment dictionary that is context-specific. 
 
 
-
-Practicing reshaping data
-
-The spread() verb allows us to quickly reshape or stack and transpose our data, making it easier to mutate().
-
+ 6.4 Computing overall sentiment with afinn lexicon dictionary
+ 
+Remember that afinn lexicon assigns scores from -5 to 5, with negative scores indicating negative sentiment and positive scores - positive sentiment
 
 ```{r}
-tidy_twitter %>% 
-  # Append the NRC sentiment dictionary
-  inner_join(get_sentiments("nrc")) %>%  
-  # Count by complaint label and sentiment
-  count(complaint_label, sentiment) %>%  
-  # Spread the sentiment and count columns
-  spread(sentiment,n)
-```
-Each of the sentiments in NRC is its own column with the associated counts as values. 
-
-
-
-Practicing with grouped summaries
-
-
-We can use spread() in association with the output of grouped summaries as well.
-•Append tidy_twitter to the afinn sentiment dictionary.
-•Group by both complaint label and whether or not the user is verified.
-•Summarize the data to create a new column, aggregate_value, which contains the sum of value.
-•Spread the complaint_label and aggregate_value columns.
-
-```{r}
-tidy_twitter %>% 
-  # Append the afinn sentiment dictionary
-  inner_join(get_sentiments("afinn")) %>% 
+twitter_sentiment_affin %>%
   # Group by both complaint label and whether or not the user is verified
   group_by(complaint_label, usr_verified) %>% 
-  # Summarize the data with an aggregate_value = sum(value)
+  # Summarize to create a new column "aggregate_value" which contains the sum of value
   summarize(aggregate_value = sum(value)) %>% 
+  # Spread the complaint_label and aggregate_value columns
+  # spread() allows us to quickly reshape or stack and transpose the data, making it easier to mutate.
   # Spread the complaint_label and aggregate_value columns
   spread(complaint_label, aggregate_value) %>% 
   mutate(overall_sentiment = Complaint + `Non-Complaint`)
+  
 ```
-With the output of the grouped summary spread(), we can easily use mutate() to create a new overall_sentiment column. It looks like unverified users complain more often, on aggregate. 
 
-
-Visualizing sentiment by complaint type
-
-
-Now let's see whether or not complaints really are more negative, on average.
-•Append tidy_twitter to the bing sentiment dictionary.
-•Count by complaint label and sentiment.
-•Spread the sentiment and count columns.
-•Add a new column, overall_sentiment, as positive - negative.
+Overall Sentiment by Complaint Type
 
 ```{r}
-sentiment_twitter <- tidy_twitter %>% 
-  # Append the bing sentiment dictionary
-  inner_join(get_sentiments("bing")) %>% 
+twitter_sentiment_bing %>% 
   # Count by complaint label and sentiment
   count(complaint_label, sentiment) %>% 
   # Spread the sentiment and count columns
   spread(sentiment, n) %>% 
-  # Compute overall_sentiment = positive - negative
-  mutate(overall_sentiment = positive - negative)
-
-```
-•Create a bar plot of overall sentiment by complaint label, colored by complaint level (as a factor). 
-•Title the plot "Overall Sentiment by Complaint Type," with the subtitle "Airline Twitter Data".
-
-```{r}
-# Create a bar plot out of overall sentiment by complaint level, colored by a complaint label factor
-ggplot(
-  sentiment_twitter, 
+  # Compute overall_sentiment = positive - negative by adding a new column overall_sentiment
+  mutate(overall_sentiment = positive - negative) %>%
+  ggplot(
   aes(x = complaint_label, y = overall_sentiment, fill = as.factor(complaint_label))
 ) +
   geom_col(show.legend = FALSE) +
@@ -466,5 +385,5 @@ ggplot(
     title = "Overall Sentiment by Complaint Type",
     subtitle = "Airline Twitter Data"
   )
-```
 
+```
