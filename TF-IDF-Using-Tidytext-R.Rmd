@@ -1,0 +1,143 @@
+---
+title: "Word and Document Frequency"
+author: "IJ"
+date: "22/12/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Required packages:
+
+* [tidyverse]
+* [tidytext]
+* [textdata]
+* [gutenbergr]: to download books from <https://www.gutenberg.org>
+
+### Key terms
+ * TF-IDF
+
+## Introduction
+
+In this text I study the important of terms in a corpus of documents, as measured by TF-IDF (Term Frequency - Inverse Document Frequency).
+TF-IDF measures how important a word is to a document in a collection (or corpus) of documents.
+
+ * TF is calculated as a ratio of the number of times a word appears in a document divided by the total number of terms (words) in that document.
+
+IDF is another approach to look at the importance of a word in a document.
+By its nature IDF decreases the weight for commonly used words and increases the weight for words that are not used very much in a corpus of documents.
+In other words, the importance increases proportionally to the number of times a word appears in the document but is offset by the frequency of the word in the corpus.
+Basically, we weigh down the frequent terms while scale up the rare ones.
+IDF is computed as follows:
+IDF(x) = log_e(Total number of documents / Number of documents with term x in it).
+
+And finally we calculate the TF-IDF statistics, which is simply a multiplication 
+of TF and IDF measures.
+TF-IDF = TF * IDF
+
+Note: In this document I will use the text mining package tidytext, although there are plenty of other text analytics packages available: tm, quanteda, text2vec, etc. The creators of tidytext package claim that this package follow the principles of the tidy data. See <https://en.wikipedia.org/wiki/Tidy_data>
+
+### Load the libraries
+Let's first load the libraries. 
+```{r loading packages}
+
+library(tidyverse)
+library(tidytext)
+library(textdata)
+library(gutenbergr)
+
+```
+
+### Download books
+Let's examine TF-IDF of two novels by Leo Tolstoy: Anna Karenina and War and Peace.
+I will download these two books from gutenberg:
+```{r download Leo Tolstoy books and bind them together}
+
+war_and_peace <- gutenberg_download(2600)
+anna_karenina <- gutenberg_download(1399)
+
+# Bind these two books together into one data frame leo_tolstoy
+leo_tolstoy <- bind_rows(mutate(war_and_peace, book = "War and Peace"),
+                         mutate(anna_karenina, book = "Anna Karenina"))
+
+```
+
+### Tokenization
+I need to do some text pre-processing befor calculating TF-IDF.
+Now we will tokenize these two books using unnest_tokens() from tidytext:
+```{r tokenizing documents}
+leo_tolstoy_tokens <- leo_tolstoy %>%
+  unnest_tokens(word, text)
+```
+
+Word (term) count by book and total number of terms by book: 
+```{r }
+book_words <- leo_tolstoy_tokens %>%
+  count(book, word, sort = TRUE)
+
+total_words <- book_words %>%
+  group_by(book) %>%
+  summarise(total = sum(n))
+
+# Adding total_words count back to book_words using left_join:
+book_words <- left_join(book_words,total_words)
+```
+
+
+### Visualizing TF distribution
+Now we can examine the distribution of the term frequency (n/total):
+```{r message=FALSE, warning=FALSE}
+
+book_words %>% ggplot(aes(n/total, fill = book)) +
+  geom_histogram(show.legend = FALSE) +
+  xlim(NA, 0.00009) +
+  facet_wrap(~book, ncol = 2, scales = "free_y")
+```
+This distribution with a long tail on the right is quite common in NLP. 
+The relationship between the frequency of a word and its rank is called Zipf’s law.
+It claims that the frequency that a word appears is inversely proportional to its rank.
+As book_words data frame is already ordered by n, let's plot rank on the x-axis and term frequency on the y-axis:
+```{r }
+freq_by_rank_plot <- book_words %>% # save plot in freq_by_rank_plot object
+  group_by(book) %>% 
+  mutate(rank = row_number(), 'term_frequency' = n/total) %>%
+  ggplot(aes(x = rank, y = term_frequency, color = book)) +
+  geom_line(size = 1, alpha = 0.5) +
+  # Plot in log-log coordinates
+  scale_x_log10() +
+  scale_y_log10()
+
+
+```
+
+### Calculating TF-IDF
+
+TF-IDF tries to find the important words for the content of each document by decreasing the weight for commonly used words and increasing the weight for words that are not commonly used in a collection (corpus) of documents.
+TF-IDF attempts to find the words that are important (common) in a text, but not too common.
+I will use bind_tf_idf() function from tidytext package to calculate TF-IDF.
+As parameters it takes word column with the terms/tokens, the documents book column and the column with the term counts (in our case column n).
+```{r }
+book_words <- bind_tf_idf(book_words,word,book,n)
+
+book_words %>% filter(tf_idf > 0.0005)
+
+book_words %>% arrange(desc(tf_idf))
+```
+
+You can notice that TF-IDF is 0 for common words
+```{r}
+book_words %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  group_by(book) %>% 
+  top_n(20) %>% 
+  ungroup() %>%
+  ggplot(aes(word, tf_idf, fill = book)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "TF-IDF") +
+  facet_wrap(~book, ncol = 2, scales = "free") +
+  coord_flip()
+```
+
