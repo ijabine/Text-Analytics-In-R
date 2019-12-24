@@ -118,16 +118,43 @@ TF-IDF tries to find the important words for the content of each document by dec
 TF-IDF attempts to find the words that are important (common) in a text, but not too common.
 I will use bind_tf_idf() function from tidytext package to calculate TF-IDF.
 As parameters it takes word column with the terms/tokens, the documents book column and the column with the term counts (in our case column n).
+Here is a chunk of the source code of bind_tf_idf():
+
+********************************************************
+bind_tf_idf.data.frame <- function(tbl, term, document, n) {
+  term <- quo_name(enquo(term))
+  document <- quo_name(enquo(document))
+  n_col <- quo_name(enquo(n))
+
+  terms <- as.character(tbl[[term]])
+  documents <- as.character(tbl[[document]])
+  n <- tbl[[n_col]]
+  doc_totals <- tapply(n, documents, sum)
+  idf <- log(length(doc_totals) / table(terms))
+
+  tbl$tf <- n / as.numeric(doc_totals[documents])
+  tbl$idf <- as.numeric(idf[terms])
+  tbl$tf_idf <- tbl$tf * tbl$idf
+
+  if(any(tbl$idf < 0, na.rm = TRUE)) warning("A value for tf_idf is negative:\nInput should have exactly one row per document-term combination.")
+
+  tbl
+}
+********************************************************
 ```{r }
+# bind_tf_idf() binds the term frequency and inverse document frequency of a tidy text dataset to the dataset
 book_words <- bind_tf_idf(book_words,word,book,n)
 
+# Showing most important words.
+# You can notice that TF-IDF is 0 for common words
 book_words %>% filter(tf_idf > 0.0005)
 
 book_words %>% arrange(desc(tf_idf))
 ```
 
-You can notice that TF-IDF is 0 for common words
-```{r}
+
+Let’s look at high tf-idf terms for two books of Leo Tolstoy:
+```{r Visualizing TF-IDF}
 book_words %>%
   arrange(desc(tf_idf)) %>%
   mutate(word = factor(word, levels = rev(unique(word)))) %>% 
@@ -140,4 +167,15 @@ book_words %>%
   facet_wrap(~book, ncol = 2, scales = "free") +
   coord_flip()
 ```
+
+Note that IDF is zero for extremely common words, i.e. words that appear in many  in many of the documents in a collection, so the idf term (the natural log of 1) is zero. 
+That is the way this approach decreases the weight for common words. 
+The IDF will be a higher number for words that occur in fewer of the documents in the collection.
+From the plot We see that names are important in these books.
+None of them occur in all of books, and they are important, characteristic words for each text within the corpus.
+The names of main characters are the most important to each book according to TF-IDF. I think it is quite logical.
+
+### Conclusion
+
+Using TF (term frequency) and IDF (inverse document frequency) permits us to find words that are characteristic for one document within a corpus of documents
 
