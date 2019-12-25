@@ -21,10 +21,14 @@ knitr::opts_chunk$set(
 * [gutenbergr]: to download books from <https://www.gutenberg.org>
 * [ggraph]: ggplot2 extention to construct network plots
 * [widyr]: to calculate pairwise correlations and distances within a tidy data frame.
-
+* [igraph]: package for manipulating and analyzing networks
+* [ggraph]
 ### Key terms
  * TF-IDF
- * n-gram
+ * bigram
+ * graph
+ * Markov chain
+ * Word pairwise correlation
  
 ## Introduction
 
@@ -40,7 +44,8 @@ library(textdata)
 library(gutenbergr)
 library(ggraph)
 library(widyr)
-
+library(igraph)
+library(ggraph)
 ```
 
 ### 2. Download books
@@ -146,11 +151,146 @@ tolstoy_bigrams_tf_idf %>%
 
 ### 6. Sentiment analysis with bigrams
 
+With one word token is not possible to examine the surrounding context of the word.
+A positive word "happy" become negative with "not" in front of it.
+Unfortunately we can not identify it with a single word token. 
+With bigrams it is easy to tell how often words are preceded by negative words like "no", "not", "never", etc
+Let's examine the text sentiment using the AFINN lexicon for sentiment analysis.
+For more details on sentiment analysis: <https://github.com/ijabine/Text-Analytics-In-R/blob/master/Sentiment-Analysis-Using-Tidytext.Rmd>
 
-```{r}
-tolstoy_split %>%
-  filter(word1 == "not") %>%
-  count(book, word1, word2, sort = TRUE)
+ 6.1. Load the AFINN lexicon
+ 
+```{r load afinn lexicon}
+afinn_lexicon <- get_sentiments("afinn")
+# afinn lexicon has a numeric sentiment value for each word
+# with positive and negative numbers indicating the direction of the sentiment:
+table(afinn_lexicon$value)
+```
+Having this numerical sentiment scale provided by AFINN dictionary we can calculate the contributions of each term to an overall sentiment value.
+For example, let a frequency of a bigram be n and a level of sentiment from afinn lexicon be value.
+Then a contribution of a term can be calculated as:
+contribution = n * value
+
+Let's perform a sentiment analysis using a list of negative words.
+
+ 6.2 Negative word vector
+First, let's create a character vector with negative words:
+ 
+```{r list of negative words}
+negative_words <- c("not","no","never","without","none","neither")
 ```
 
+ 6.3 Sentiment analysis
+We will filter tolstoy_split using the negative_words list and join the result with afinn_lexicon  
+```{r}
+tolstoy_sentiment_analysis <- tolstoy_split %>%
+  filter(word1 %in% negative_words) %>%
+  inner_join(afinn_lexicon, by = c(word2 = "word")) %>%
+  count(book,word1, word2, value, sort = TRUE)
+```
 
+```{r}
+tolstoy_sentiment_analysis %>%
+  mutate(contribution = n * value) %>%
+  arrange(desc(abs(contribution))) %>%
+  head(20) %>%
+  mutate(word2 = reorder(word2, contribution)) %>%
+  ggplot(aes(word2, n * value, fill = n * value > 0)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~word1, ncol = 6, scales = "free") +
+  xlab("Words preceded by negation") +
+  ylab("Sentiment value * number of occurrences") +
+  coord_flip()
+```
+
+ 6.4 Network of bigrams using igraph and ggraph
+
+Graph allows us to visualize relationships among words simultaneously by arranging the words into a network or graph.
+I am going to create an igraph object from tolstoy_bigram_count data frame by using graph_from_data_frame() function.
+It takes a data frame of edges with columns for “from”, “to”, and edge attributes (in this case n):
+```{r building igraph object}
+# First create a data frame with word1, word2 and frequency count:
+tolstoy_bigram_count <- tolstoy_no_stop_words %>% count(word1,word2, sort = TRUE)
+
+# filter for only relatively common combinations
+tolstoy_bigram_graph <- tolstoy_bigram_count %>%
+  filter(n > 20) %>%
+  graph_from_data_frame()
+
+```
+
+To visualize tolstoy_bigram_graph we should use ggraph() function from ggraph package. 
+Ggraph package uses the same principle of grammar of graphics as ggplot2.
+```{r visualizing graph}
+
+# edge_alpha = n - makes arrows transparent based on how common or rare the bigram is
+a <- grid::arrow(type = "closed", length = unit(.15, "inches"))
+
+ggraph(tolstoy_bigram_graph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 4) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void()
+```
+This visualization is also called a Markov chain.
+
+### 7. Words correlation
+
+In addition to tokens, pairs of adjacent words, we might be interested in finding pairwise counts or correlations of co-occuring words.
+```{r pairwise count}
+
+war_and_peace_sections <- war_and_peace %>% 
+  mutate(section = row_number() %/% 10) %>%
+  filter(section > 0) %>%
+  unnest_tokens(word, text) %>%
+  filter(!word %in% stop_words$word)
+
+
+war_and_peace_word_pairs <- war_and_peace_sections %>%
+  pairwise_count(word, section, sort = TRUE)
+
+war_and_peace_word_pairs %>% filter(item1 == "andrew")
+
+```
+
+Correlation among words measures how often they appear together relative to how often they appear separately.
+Phi coefficient is used for binary correlation (<https://en.wikipedia.org/wiki/Phi_coefficient>)
+pairwise_cor() function from widyr package calculates the phi coefficient between words based on how often they appear in the same section.
+```{r pairwise word correlation}
+# we need to filter for at least relatively common words first
+war_and_peace_sections_word_cors <- war_and_peace_sections %>%
+  group_by(word) %>%
+  filter(n() >= 20) %>%
+  pairwise_cor(word, section, sort = TRUE)
+
+```
+
+Let's take the main characters of War and Peace and find the other words most associated with them
+```{r visualizing word correlation}
+main_characters <- c("pierre", "andrew", "mary", "natásha")
+
+war_and_peace_sections_word_cors %>%
+  filter(item1 %in% main_characters) %>%
+  group_by(item1) %>%
+  top_n(10) %>%
+  ungroup() %>%
+  mutate(item2 = reorder(item2, correlation)) %>%
+  ggplot(aes(item2, correlation)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ item1, scales = "free") +
+  coord_flip()  
+```
+
+Using ggraph we can visualize the word correlation grap:
+```{r correlations graph}
+war_and_peace_sections_word_cors %>%
+  filter(item1 %in% main_characters) %>%
+  filter(correlation > .15) %>%
+  graph_from_data_frame() %>%
+  ggraph(layout = "fr") +
+  geom_edge_link(aes(edge_alpha = correlation), show.legend = FALSE) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_void()
+```
