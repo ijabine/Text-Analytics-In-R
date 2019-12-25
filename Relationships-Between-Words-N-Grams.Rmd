@@ -1,0 +1,156 @@
+---
+title: 'Relationships between words: n-grams'
+author: "Illarion Jabine"
+date: "24/12/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+### Required packages:
+
+* [tidyverse]
+* [tidytext]: text analysis toolbox
+* [textdata]
+* [gutenbergr]: to download books from <https://www.gutenberg.org>
+* [ggraph]: ggplot2 extention to construct network plots
+* [widyr]: to calculate pairwise correlations and distances within a tidy data frame.
+
+### Key terms
+ * TF-IDF
+ * n-gram
+ 
+## Introduction
+
+
+
+### 1. Load the libraries
+Let's first load the libraries. 
+```{r loading packages}
+
+library(tidyverse)
+library(tidytext)
+library(textdata)
+library(gutenbergr)
+library(ggraph)
+library(widyr)
+
+```
+
+### 2. Download books
+
+Let's download two novels by Leo Tolstoy from gutenberg: Anna Karenina and War and Peace.
+```{r download Leo Tolstoy books and bind them together}
+
+war_and_peace <- gutenberg_download(2600)
+anna_karenina <- gutenberg_download(1399)
+
+# Bind these two books together into one data frame leo_tolstoy
+leo_tolstoy <- bind_rows(mutate(war_and_peace, book = "War and Peace"),
+                         mutate(anna_karenina, book = "Anna Karenina"))
+
+```
+
+### 3. Tokenization by n-gram
+
+I need to do some text pre-processing befor calculating TF-IDF.
+Now I will use unnest_tokens() from tidytext to tokenize corpus of documents into consecutive sequences of words or n-grams (token = "ngrams" as an argument). 
+N-grams will allow us to do interesting text analyses, based on the relationships between words.
+It can include examining which words tend to follow others immediately, or co-occur within the same documents.
+```{r tokenization by bigrams}
+# I set token = "ngrams" and n = 2.
+# I am going to examine pairs of two consecutive words, so called “bigrams”
+tolstoy_bigrams <- leo_tolstoy %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2)
+# Each token represents a bigram
+```
+
+```{r}
+tolstoy_bigrams %>% count(bigram, sort = TRUE)
+```
+
+### 4. Pre-processing bigrams
+
+There are a lot of pairs of common words such as "of the", "in the", etc. 
+We need to remove them using stop_words.
+First we will split bigrams into two words using separate() from tidyr and then apply stop_words dictionary and finally unite them all together.
+
+```{r pre-processing bigrams}
+# 1. split bigrams into 2 words
+tolstoy_split <- tolstoy_bigrams %>%
+  separate(bigram,c("word1","word2"), sep =" ")
+
+# 2. remove stop words from word1 and word2 columns
+tolstoy_no_stop_words <- tolstoy_split %>%
+  anti_join(stop_words,by = c("word1" = "word")) %>%
+  anti_join(stop_words,by = c("word2" = "word"))
+# Another way to remove stop words:
+#tolstoy_no_stop_words <- tolstoy_split %>%
+#  filter(!word1 %in% stop_words$word) %>%
+#  filter(!word2 %in% stop_words$word)
+
+# Let's the frequency count after removing stop words: 
+tolstoy_no_stop_words %>% count(word1,word2, sort = TRUE)
+
+# 3. Now let's join word1 and word2 back into one column using unite() function:
+tolstoy_bigrams_combined <- tolstoy_no_stop_words %>% 
+  unite(bigram,word1,word2, sep = " ")
+
+tolstoy_bigrams_combined %>% count(bigram, sort = TRUE)
+```
+
+### 5. Bigram frequency analysis, bigram TF-IDF
+
+Bigrams can be a useful tool for the text exploratory analyses. 
+For example we can examine what words characterize Andrew Bolkonski:
+```{r}
+# Words characterizing Andrew Bolkonski: 
+tolstoy_no_stop_words %>% filter(word1 == "andrew") %>%
+  count(word2,sort = TRUE)
+```
+ 
+ 5.1 Bigram TF-IDF
+
+Bigrams can also serve as tokens or terms for TF-IDF calculation, the same way
+when an individual word is treated as a token.
+Bigram can provide more context and capture text structure better tan just individual words. 
+To calculate bigram TF-IDF I use the same function bind_tf_idf().
+(see my text <https://github.com/ijabine/Text-Analytics-In-R/blob/master/TF-IDF-Using-Tidytext-R.Rmd>):
+```{r bigram tf-idf}
+tolstoy_bigrams_tf_idf <- tolstoy_bigrams_combined %>% 
+  count(book, bigram) %>%
+  bind_tf_idf(bigram,book,n) %>%
+  arrange(desc(tf_idf))
+```
+
+5.2 TF-IDF bigram plot
+```{r bigram TF-IDF plot}
+tolstoy_bigrams_tf_idf %>% 
+  arrange(desc(tf_idf)) %>%
+  mutate(bigram = factor(bigram, levels = rev(unique(bigram)))) %>% 
+  group_by(book) %>% 
+  top_n(15) %>%
+  ungroup() %>%
+  ggplot(aes(x = bigram, y = tf_idf, fill = book)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "TF-IDF") +
+  facet_wrap(~book, ncol = 2, scales = "free") +
+  coord_flip()
+```
+
+### 6. Sentiment analysis with bigrams
+
+
+```{r}
+tolstoy_split %>%
+  filter(word1 == "not") %>%
+  count(book, word1, word2, sort = TRUE)
+```
+
+
