@@ -1,0 +1,145 @@
+---
+title: "Topic modeling using tidytext,tm and topicmodels packages"
+author: "IJ"
+date: "27/12/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+### Required packages:
+
+* [tidyverse]
+* [tidytext]: text analysis toolbox
+* [tm]: Comprehensive text mining package
+* [gutenbergr]: to download books from <https://www.gutenberg.org>
+* [topicmodels]
+
+### Key terms
+ * Latent Dirichlet allocation (LDA)
+ * tidytext integration with other NLP R packages
+ * document-term matrix (DTM)
+ * document-frequency matrix (DFM)
+ 
+## Introduction
+
+Topic modeling is an unsupervised method of clustering documents into destinct groups or topics.
+In Latent Dirichlet allocation (LDA) each document is represented as a mixture of topics, whereas each topic is a mixture of words (terms). 
+Some terms may belong to several topics simultaneously creating overlaps.
+In two topic model, LDA can identify a document as 80% topic A and 20% topic B.
+LDA can both identify the group of words that describe each topic, and determin the mixture of topics in each document. 
+
+### Useful Links
+ * For a comprehensive list of R NLP packages see <https://cran.r-project.org/web/views/NaturalLanguageProcessing.html>.
+ * For Regular Expressions (regex): <https://www.rexegg.com/> 
+
+### Integration of tidytext package with other NLP R packages
+
+tidytext package has functionality that allows it to read and save objects created in popular NLP packages "tm" and "quanteda".
+The text mining packages work with a document-term matrix (DTM) in tm package
+and document-frequency matrix (DFM) in quanteda package.
+DTM/DFM is constructed in the following way:
+ * each row represents one document,
+ * each column represents one term,
+ * each cell contains the frequency of appearances of that term in the document.
+1. tidy() function turns a DTM/DFM into a tidy one-term-per-row data frame.
+2. cast_dtm() converts to a DocumentTermMatrix object from tm
+3. cast_dfm() converts to a dfm object from quanteda
+4. cast_sparse() converts to a sparse matrix from the Matrix package
+
+
+### Load the libraries
+Let's first load the libraries. 
+```{r loading packages}
+
+library(tidyverse)
+library(tidytext)
+library(tm)
+library(topicmodels)
+library(gutenbergr)
+
+```
+
+
+### 1. Loading text files
+We are going to work with 6 short stories by a Russian writer Anton Chekhov. 
+```{r Loading text files}
+# We need to setup the current directory and point to where the source text files are located.
+setwd("../Text Analytics New/data/topic_model")
+# Read teh contents of the directory and create a file name vector 
+file_names <- list.files(getwd(),pattern = "*.txt")
+# Read the contents of files and create a list of documents
+raw_text <- lapply(file_names, readLines)
+
+
+dtm <- DocumentTermMatrix(doc_corpus)
+```
+
+### 2. Creating a corpus of documents
+Text corpus (plural corpora) is a large and structured set of texts or collections of documents containing (natural language) text. 
+It is used  to do statistical analysis and hypothesis testing, checking occurrences or validating linguistic rules.
+A Corpus is the main structure for managing documents in tm (text mining) package. 
+Corpus() function creates a Corpus object with conent of each document and additinal metadata.
+Metadata is used to annotate text documents or whole corpora with additional information.
+Use meta() function to update metadate.
+```{r creating corpus}
+doc_corpus <- Corpus(VectorSource(raw_text))
+```
+
+### 3. Corpus text pre-processing 
+tm package offers a comprehensive tm_map function that allows to apply transformation functions (also denoted as mappings) to corpora. The transformations can include:
+ 1. removal of numbers, punctuations
+ 2. stopwords
+ 3. stripping of white spaces
+ 4. stemming
+ 5. etc...
+```{r  corpus pre-processing}
+# remove stop words
+doc_corpus_clean <- tm_map(doc_corpus, removeWords, stopwords("english"))
+
+# define my own stopword list
+custom_stopwords <- c("he","him","her","she","her","me","my","I","they","them","the","a")
+# remove custom stop words
+doc_corpus_clean <- tm_map(doc_corpus_clean, removeWords, custom_stopwords)
+
+# remove numbers from corpus
+doc_corpus_clean <- tm_map(doc_corpus_clean, removeNumbers)
+
+# remove punctuation from document corpus
+doc_corpus_clean <- tm_map(doc_corpus_clean, removePunctuation)
+
+# Eliminating extra whitespac
+doc_corpus_clean <- tm_map(doc_corpus_clean, stripWhitespace)
+
+#Convert to lower case
+doc_corpus_clean <- tm_map(doc_corpus_clean, content_transformer(tolower))
+
+# Stemming
+doc_corpus_clean <- tm_map(doc_corpus_clean, stemDocument)
+
+```
+
+
+
+### 4. Document Term/Term Document Matrix
+A common approach in text mining is to create a term-document matrix from a corpus.
+TermDocumentMatrix() and DocumentTermMatrix() (depending on whether you want terms as rows and
+documents as columns, or vice versa) are used to create DTM.
+```{r Document Term/Term Document Matrix}
+# define control parameters to create a DTM. 
+control_params <- list(stopwords = TRUE,weighting = weightTf,
+                   stemming = TRUE,removeNumbers = TRUE,
+                   minDocFreq = 1)
+# creat DTM (documents in rows)
+dtm <- DocumentTermMatrix(doc_corpus_clean, control = control_params)
+
+inspect(removeSparseTerms(dtm, 0.4))
+
+# create TDM (terms in rows)
+tdm <- TermDocumentMatrix(doc_corpus_clean, control = control_params)
+inspect(removeSparseTerms(tdm, 0.4))
+```
+
