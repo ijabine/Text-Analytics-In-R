@@ -2,7 +2,9 @@
 title: "Topic modeling using tidytext,tm and topicmodels packages"
 author: "IJ"
 date: "27/12/2019"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -53,7 +55,7 @@ DTM/DFM is constructed in the following way:
 
 ### Load the libraries
 Let's first load the libraries. 
-```{r loading packages}
+```{r loading packages, message=FALSE, warning=FALSE}
 
 library(tidyverse)
 library(tidytext)
@@ -71,11 +73,17 @@ We are going to work with 6 short stories by a Russian writer Anton Chekhov.
 setwd("../Text Analytics New/data/topic_model")
 # Read teh contents of the directory and create a file name vector 
 file_names <- list.files(getwd(),pattern = "*.txt")
+# saving file names without .txt
+doc_names <- str_split_fixed(file_names,".txt",2)[,1]
+
+# removing _ and extra blanks
+doc_names <- doc_names %>% str_replace_all("_"," ") %>% str_replace_all("  "," ")
+
 # Read the contents of files and create a list of documents
 raw_text <- lapply(file_names, readLines)
 
-
-dtm <- DocumentTermMatrix(doc_corpus)
+# assign document names to the elements of the list
+names(raw_text) <- doc_names
 ```
 
 ### 2. Creating a corpus of documents
@@ -143,3 +151,63 @@ tdm <- TermDocumentMatrix(doc_corpus_clean, control = control_params)
 inspect(removeSparseTerms(tdm, 0.4))
 ```
 
+### 5. Latent (i.e. hidden) Dirichlet allocation
+
+Now when we have our DTM we can apply Latent Dirichlet allocation to it.
+LDA is guided by 2 principles:
+ 1. Every document is a mixture of topics: 
+ Each document may contain words from several topics in particular proportions. 
+ For example in 2 topic model, Document1 is 80% topic A and 20% topic B. Document 2 is viceversa.
+ 2. Every topic is a mixture of words:
+ For example a two-topic model of a magazine, with one topic of "art" and the other of "travel".
+ Art topic may consist of words "painting", "museum", whereas travel "sightseeing", and might also contain the word "museum". 
+ It is important to understand that words can be shared among the topics.
+Why latent or hidden is in the name of LDA?
+Somehow we might know beforehand that several topics or themes exist in the corpus of documents.
+These topics are not observed (they are just assumed), but we can see the documents and words.
+So, we say that topics are hidden or latent.
+
+I will use LDA() function from topicmodels package:
+```{r LDA}
+
+# We can specify certain control parameters for LDA algorithm and for Gibbs sampling:
+lda_control_params <- list(burnin = 3000, iter = 1000, 
+                           thin = 200, seed = list(12345,2323,434,452,88), 
+                           nstart = 5, best = TRUE)
+# Number of topics, well we have 6 books, let's assume we have 6 topics :)
+k <- 6
+
+# Now we can run LDA with Gibbs sampling:
+chekhov_lda_model_gibbs <- LDA(dtm, k, method= "Gibbs", control = lda_control_params)
+
+# Or we can use default method = VEM:
+chekhov_lda_model_vem <- LDA(dtm,k,control = list(seed = 1234))
+```
+
+The LDA model has been created. The model estimates two types of probabilities:
+ 1. "beta": per-topic-per-word probabilities - describes a distribution of words in a topic
+ 2. "gamma": per-document-per-topic probabilities - describes a distribution of topics in a document
+To extract these two probabilities from the LDA object, I will use tidy() function
+```{r}
+chekhov_topics <- tidy(chekhov_lda_model_vem, matrix = "beta")
+
+```
+chekhov_topics is a dataframe with one-topic-per-term-per-row format (so-called tidy format).
+For each combination of topic and term, the model computes the probability of that term being generated from that topic.
+Now we can use tidyverse infrastructure to visualize the LDA results:
+
+```{r visualizing LDA results}
+chekhov_topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta) %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip() +
+  scale_x_reordered()
+```
+
+ 
