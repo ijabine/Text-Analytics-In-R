@@ -1,6 +1,6 @@
 ---
 title: "Topic modeling using tidytext,tm and topicmodels packages"
-author: "IJ"
+author: "Illarion Jabine"
 date: "27/12/2019"
 output:
   html_document: default
@@ -17,7 +17,6 @@ knitr::opts_chunk$set(echo = TRUE)
 * [tidyverse]
 * [tidytext]: text analysis toolbox
 * [tm]: Comprehensive text mining package
-* [gutenbergr]: to download books from <https://www.gutenberg.org>
 * [topicmodels]
 
 ### Key terms
@@ -61,7 +60,7 @@ library(tidyverse)
 library(tidytext)
 library(tm)
 library(topicmodels)
-library(gutenbergr)
+
 
 ```
 
@@ -71,7 +70,7 @@ We are going to work with 6 short stories by a Russian writer Anton Chekhov.
 ```{r Loading text files, message=FALSE, warning=FALSE}
 # We need to setup the current directory and point to where the source text files are located.
 setwd("../Text Analytics New/data/topic_model")
-# Read teh contents of the directory and create a file name vector 
+# Read the contents of the directory and create a file name vector 
 file_names <- list.files(getwd(),pattern = "*.txt")
 # saving file names without .txt
 doc_names <- str_split_fixed(file_names,".txt",2)[,1]
@@ -185,8 +184,10 @@ chekhov_lda_model_vem <- LDA(dtm,k,control = list(seed = 1234))
 ```
 
 The LDA model has been created. The model estimates two types of probabilities:
- 1. "beta": per-topic-per-word probabilities - describes a distribution of words in a topic
- 2. "gamma": per-document-per-topic probabilities - describes a distribution of topics in a document
+ 1. "beta": per-topic-per-word probabilities - describes a distribution of words in a topic.
+ This is word-topic probability distribution
+ 2. "gamma": per-document-per-topic probabilities - describes a distribution of topics in a document.
+ This is document-topic probability distribution.
 To extract these two probabilities from the LDA object, I will use tidy() function
 ```{r extracting beta, message=FALSE, warning=FALSE}
 chekhov_topics <- tidy(chekhov_lda_model_vem, matrix = "beta")
@@ -230,11 +231,103 @@ It seems that the results of LDA and the word frequency count correlate with eac
 Once we have identified topics within the documents we need to map documents to those topics.
 In addition to estimating each topic as a mixture of words, LDA also models each document as a mixture of topics. 
 To do that we need to examine the per-document-per-topic probabilities or “gamma”.
-This can be done using tidy():
+This can be done using tidy() to retrieve the statistical components of the model:
 ```{r extracting gamma, message=FALSE, warning=FALSE }
 chekhov_topics_documents <- tidy(chekhov_lda_model_vem, matrix = "gamma")
 
-chekhov_topics_documents %>% select(document) %>%
-  arrange(desc(gamma))
+```
+
+```{r}
+# Visualizing the mapping between documents and topics.
+chekhov_topics_documents %>% top_n(6,gamma) %>% select(document,topic) %>% arrange(document)
+chekhov_topics_documents %>% arrange(document)
+```
+
+For example, the LDA model estimates that about 99.99% of the words in document 1 originate from topic 6 (gamma is nearly 1).
+
+
+Now let's apply LDA to 2 longer stories "The lady with the dog" and "Ward No 6" by Chekhov which are made up of 4 and 19 chapters respectevely.
+We treat each chapter as a separate document.
+
+```{r the lady with the dog, message=FALSE, warning=FALSE}
+setwd("../Text Analytics New/data/topic_model")
+raw_text_lady <- readLines("THE LADY WITH THE DOG.txt")
+raw_text_ward <- readLines("WARD NO 6.txt")
+# convert to a data frame
+raw_text_lady <- as.data.frame(raw_text_lady,stringsAsFactors = FALSE)
+raw_text_ward <- as.data.frame(raw_text_ward,stringsAsFactors = FALSE)
+# change the column name to "text"
+colnames(raw_text_lady) <- c("text")
+colnames(raw_text_ward) <- c("text")
+
+# create a new column with chapter number, and also assign document names,
+# the document column is required later when DTM matrix is created with cast_dtm().
+text_lady_by_chapter <- raw_text_lady %>%
+  mutate(document = c("The lady with the dog"),
+    chapter = cumsum(str_detect(text, regex("^chapter ", ignore_case = TRUE))))
+
+text_ward_by_chapter <- raw_text_ward %>%
+  mutate(document = c("Ward No 6"),
+    chapter = cumsum(str_detect(text, regex("^chapter ", ignore_case = TRUE))))
+
+# bind all together
+text <- bind_rows(text_lady_by_chapter,text_ward_by_chapter)
+# create one-term-per-row matrix using unnest_tokens() from tidytext package
+text_by_chapter_word <- text %>% unnest_tokens(word,text)
+
+# calculate word frequencies and remove stop words
+
+text_word_count <- text_by_chapter_word %>% 
+  anti_join(stop_words) %>%
+  count(document,word, sort = TRUE) %>%
+  ungroup()
+
+# Now we have to convert lady_word_count (which is in tidy format) into DTM format understandable by LDA model. 
+# To do that we have to use cast_dtm() from tidytext package
+
+dtm <- text_word_count %>% cast_dtm(document,word,n)
+
+# Now let's apply LDA on chapters, number of topics is 2:
+lda_model_2_topic <- LDA(dtm, k = 2, control = list(seed = 1234))
+
+# Now let's apply LDA on chapters, number of topics is 4:
+lda_model_4_topic <- LDA(dtm, k = 4, control = list(seed = 1234))
+
+# Let's extract per-topic-per-word probabilities from the LDA object:
+text_2_topics <- tidy(lda_model_2_topic, matrix = "beta")
+text_4_topics <- tidy(lda_model_4_topic, matrix = "beta")
+
+# Let's visualize top terms per topic for 2 topic model:
+
+text_2_topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta) %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip() +
+  scale_x_reordered()
+
+# Let's visualize top terms per topic for 4 topic model:
+
+text_4_topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta) %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip() +
+  scale_x_reordered()
+
+
+# Now let's see which topics are associated with each document (gamma probabilities):
+documents_2_topics <- tidy(lda_model_2_topic, matrix = "gamma")
+documents_2_topics
 ```
 
