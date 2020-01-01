@@ -3,8 +3,8 @@ title: "Topic modeling using tidytext,tm and topicmodels packages"
 author: "IJ"
 date: "27/12/2019"
 output:
-  pdf_document: default
   html_document: default
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -68,7 +68,7 @@ library(gutenbergr)
 
 ### 1. Loading text files
 We are going to work with 6 short stories by a Russian writer Anton Chekhov. 
-```{r Loading text files}
+```{r Loading text files, message=FALSE, warning=FALSE}
 # We need to setup the current directory and point to where the source text files are located.
 setwd("../Text Analytics New/data/topic_model")
 # Read teh contents of the directory and create a file name vector 
@@ -93,7 +93,7 @@ A Corpus is the main structure for managing documents in tm (text mining) packag
 Corpus() function creates a Corpus object with conent of each document and additinal metadata.
 Metadata is used to annotate text documents or whole corpora with additional information.
 Use meta() function to update metadate.
-```{r creating corpus}
+```{r creating corpus, message=FALSE, warning=FALSE}
 doc_corpus <- Corpus(VectorSource(raw_text))
 ```
 
@@ -104,7 +104,7 @@ tm package offers a comprehensive tm_map function that allows to apply transform
  3. stripping of white spaces
  4. stemming
  5. etc...
-```{r  corpus pre-processing}
+```{r  corpus pre-processing, message=FALSE, warning=FALSE}
 # remove stop words
 doc_corpus_clean <- tm_map(doc_corpus, removeWords, stopwords("english"))
 
@@ -136,7 +136,7 @@ doc_corpus_clean <- tm_map(doc_corpus_clean, stemDocument)
 A common approach in text mining is to create a term-document matrix from a corpus.
 TermDocumentMatrix() and DocumentTermMatrix() (depending on whether you want terms as rows and
 documents as columns, or vice versa) are used to create DTM.
-```{r Document Term/Term Document Matrix}
+```{r Document Term/Term Document Matrix, message=FALSE, warning=FALSE}
 # define control parameters to create a DTM. 
 control_params <- list(stopwords = TRUE,weighting = weightTf,
                    stemming = TRUE,removeNumbers = TRUE,
@@ -168,7 +168,7 @@ These topics are not observed (they are just assumed), but we can see the docume
 So, we say that topics are hidden or latent.
 
 I will use LDA() function from topicmodels package:
-```{r LDA}
+```{r LDA, message=FALSE, warning=FALSE}
 
 # We can specify certain control parameters for LDA algorithm and for Gibbs sampling:
 lda_control_params <- list(burnin = 3000, iter = 1000, 
@@ -188,15 +188,19 @@ The LDA model has been created. The model estimates two types of probabilities:
  1. "beta": per-topic-per-word probabilities - describes a distribution of words in a topic
  2. "gamma": per-document-per-topic probabilities - describes a distribution of topics in a document
 To extract these two probabilities from the LDA object, I will use tidy() function
-```{r}
+```{r extracting beta, message=FALSE, warning=FALSE}
 chekhov_topics <- tidy(chekhov_lda_model_vem, matrix = "beta")
 
 ```
 chekhov_topics is a dataframe with one-topic-per-term-per-row format (so-called tidy format).
 For each combination of topic and term, the model computes the probability of that term being generated from that topic.
-Now we can use tidyverse infrastructure to visualize the LDA results:
+ 
+ 5.1 Topic identification
+ 
+Now we can use tidyverse infrastructure to visualize the topics identified by LDA.
+Below are histograms with the terms that are most common within each topic:
 
-```{r visualizing LDA results}
+```{r visualizing topics, message=FALSE, warning=FALSE}
 chekhov_topics %>%
   group_by(topic) %>%
   top_n(10, beta) %>%
@@ -210,4 +214,27 @@ chekhov_topics %>%
   scale_x_reordered()
 ```
 
- 
+As I specifically asked the system to find 6 topics (k <- 6) by looking at each topic we can sort of
+figure out the main topic idea. For example, the first topic is about Nadia's love to Gorni and her thoughts about that.
+Let's check this by using tidy() on the document-term matrix and selecting the most common words in "AFTER THE THEATRE" short store, which is 2nd document.
+
+```{r AFTER THE THEATRE word count}
+tidy(dtm) %>%
+  filter(document == 2) %>%
+  arrange(desc(count))
+
+```
+It seems that the results of LDA and the word frequency count correlate with each other.
+
+ 5.2 Mapping documents to topics
+Once we have identified topics within the documents we need to map documents to those topics.
+In addition to estimating each topic as a mixture of words, LDA also models each document as a mixture of topics. 
+To do that we need to examine the per-document-per-topic probabilities or “gamma”.
+This can be done using tidy():
+```{r extracting gamma, message=FALSE, warning=FALSE }
+chekhov_topics_documents <- tidy(chekhov_lda_model_vem, matrix = "gamma")
+
+chekhov_topics_documents %>% select(document) %>%
+  arrange(desc(gamma))
+```
+
