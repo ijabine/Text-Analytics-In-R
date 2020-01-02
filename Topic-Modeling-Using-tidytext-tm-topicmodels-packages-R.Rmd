@@ -69,7 +69,7 @@ library(topicmodels)
 We are going to work with 6 short stories by a Russian writer Anton Chekhov. 
 ```{r Loading text files, message=FALSE, warning=FALSE}
 # We need to setup the current directory and point to where the source text files are located.
-setwd("../Text Analytics New/data/topic_model")
+setwd("../Text-Analytics-In-R/data/topic_model")
 # Read the contents of the directory and create a file name vector 
 file_names <- list.files(getwd(),pattern = "*.txt")
 # saving file names without .txt
@@ -329,5 +329,9 @@ text_4_topics %>%
 # Now let's see which topics are associated with each document (gamma probabilities):
 documents_2_topics <- tidy(lda_model_2_topic, matrix = "gamma")
 documents_2_topics
-```
 
+documents_4_topics <- tidy(lda_model_4_topic, matrix = "gamma")
+documents_4_topics
+```
+"Ward No 6" is made up of 26.5% from topic 1, 52.9% from topic 2 and 20.5% from topic 3.
+"The lady with the dog" draws entirely from topic 4.
