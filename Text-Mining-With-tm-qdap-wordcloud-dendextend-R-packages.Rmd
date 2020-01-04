@@ -1,0 +1,363 @@
+---
+title: "Text mining using tm, qdap, wordcloud and dendextend R packages"
+author: "Illarion Jabine"
+date: "03/02/2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+### Required packages:
+
+* [tm]: Comprehensive text mining package
+* [qdap]: Automates many of the tasks associated with quantitative discourse analysis of transcripts containing discourse
+including frequency counts of sentence types, words, sentences, turns of talk, syllables and other assorted
+* [wordcloud]: word clouds, visualize differences and similarity between documents
+* [plotrix]: Various plotting functions
+* [dendextend]: Extends 'dendrogram' functionality in R
+* [NLP]: Basic classes and methods for Natural Language Processing
+* [dplyr]
+
+
+### Key terms
+ * Bag of words
+ * Corpus
+ * Document-term matrix (DTM)/ term-document matrix(TDM)
+ * Text pre-processing
+ * Word cloud
+ * Visualizing common words
+ * Pyramid plot
+ * Word networks
+ * Word clustering
+ * Distance matrix
+ * Word dendrogram
+ 
+## Introduction
+
+Text mining can be defined as a process of extracting actionable insights from text.
+The text mining workflow starts with the problem definition which is derived from gaining subject matter expertise.
+Then different raw text sources are identified. The source text is stil in unorganized state, i.e. in semi and un-structured.
+The text should go pre-processing phase, it must be organized, useful features extracted from it, and only after the text is in organized state
+that the analysis can begin.
+There are two major approaches to text analytics:
+ 1. Semantic parsing
+ 2. Bag of words
+In this manual I will use bag of words approach.
+The tm text mining package work with a document corpus (corpora in plural).
+Corpora are collections of documents containing (natural language) text.
+A corpus can also have metadata information about the text documents.
+There are two kinds of the corpus data type, the permanent corpus - PCorpus, and the volatile corpus - VCorpus.
+The volatile corpus is held in your computer's RAM rather than saved to disk.
+Once the raw text data is stored in corpus, the tm package can convert it into DTM or TDM matrix.
+DTM is constructed in the following way:
+ * each row represents one document,
+ * each column represents one term,
+ * each cell contains the frequency of appearances of that term in the document.
+TDM is a transposed version of DTM.
+
+### Useful Links
+ * For a comprehensive list of R NLP packages see <https://cran.r-project.org/web/views/NaturalLanguageProcessing.html>.
+
+
+### Load the libraries
+Let's first load the libraries. 
+```{r loading packages, message=FALSE, warning=FALSE}
+library(tm)
+library(qdap)
+library(wordcloud)
+library(dendextend)
+library(plotrix)
+library(dplyr)
+```
+
+
+### 1. Loading text files
+We are going to work with 2 twitter csv extracts: one about coffee and the other about chardonnay 
+```{r Loading text files, message=FALSE, warning=FALSE}
+# important to use the argument stringsAsFactors = FALSE
+coffee <- read.csv("C:/Users/Illarion/Documents/R Projects/Text Analytics New/data/text_mining_using_tm/coffee.csv", stringsAsFactors = FALSE)
+chardonnay <- read.csv("C:/Users/Illarion/Documents/R Projects/Text Analytics New/data/text_mining_using_tm/chardonnay.csv", stringsAsFactors = FALSE)
+
+# We are interested only in text columns, to isolate text from tweets:
+coffee_tweets <- coffee$text
+chardonnay_tweets <- chardonnay$text
+```
+
+### 2. Creating a corpus of documents
+Text corpus is a large and structured set of texts or collections of documents containing (natural language) text. 
+It is used  to do statistical analysis and hypothesis testing, checking occurrences or validating linguistic rules.
+A corpus is the main structure for managing documents in tm (text mining) package. 
+VCorpus() function creates a volatile corpus object with conent of each document and additinal metadata.
+Metadata is used to annotate text documents or whole corpora with additional information.
+Use meta() function to update metadate.
+
+```{r creating corpus, message=FALSE, warning=FALSE}
+# To make a volatile corpus, R needs to interpret each element in our vector of text, coffee_tweets and chardonnay_tweets, as a document.
+# There are two source function called VectorSource() and DataframeSource() to create source objects for VCorpus() function. In our case I will use VectorSource().
+#The data frame passed to DataframeSource() must have a specific structure:
+# Column one must be called doc_id and contain a unique string for each row.
+# Column two must be called text with "UTF-8" encoding.
+# Any other columns, 3+ are considered metadata and will be retained as such.
+
+# Make a vector source from coffee_tweets
+coffee_source <- VectorSource(coffee_tweets)
+chardonnay_source <- VectorSource(chardonnay_tweets)
+
+# Now we can create a volatile corpus from the vector source
+coffee_corpus <- VCorpus(coffee_source )
+chardonnay_corpus <- VCorpus(chardonnay_source )
+
+# Individual elements of corpus can be accessed using [[]]
+chardonnay_corpus[[20]]
+# Print the contents of the 10th tweet in chardonnay_corpus
+content(chardonnay_corpus[[20]]) # or
+chardonnay_corpus[[20]][1]
+
+# To access or modify the metadata:
+meta(chardonnay_corpus[[20]])
+meta(chardonnay_corpus[[20]], tag = "author") <- "Bob Brown"
+```
+
+### 3. Corpus text pre-processing 
+tm package offer a comprehensive tm_map function that allows to apply transformation functions (also denoted as mappings) to corpora.
+tm_map() takes two arguments, a corpus and a cleaning function.
+
+Common preprocessing functions include:
+tolower(): Make all characters lowercase
+removePunctuation(): Remove all punctuation marks
+removeNumbers(): Remove numbers
+stripWhitespace(): Remove excess whitespace
+removeWords(): remove words from text (normally stop words)
+
+qdap package offers other text cleaning functions:
+* bracketX(): Remove all text within brackets (e.g. "It's (so) cool" becomes "It's cool")
+* replace_number(): Replace numbers with their word equivalents (e.g. "2" becomes "two")
+* replace_abbreviation(): Replace abbreviations with their full text equivalents (e.g. "Sr" becomes "Senior")
+* replace_contraction(): Convert contractions back to their base words (e.g. "shouldn't" becomes "should not")
+* replace_symbol() Replace common symbols with their word equivalents (e.g. "$" becomes "dollar")
+ ! Note: For compatibility, base R and qdap functions need to be wrapped in content_transformer()
+```{r  corpus preprocessing: clean_corpus function, message=FALSE, warning=FALSE}
+# To make the cleaning steps easier let's write a customized function:
+clean_corpus <- function(corpus){
+# create a vector of stop words by combining standard stopwords with domain specific.
+# As we textmine for coffee and chardonnay these words should be removed, because
+# otherwise they will dominate other words, and make finding useful patterns difficult.
+# To review standard stop words call stopwords("en")
+  custom_stop_words <- c(stopwords("en"), "coffee", "mug","chardonnay")
+  corpus <- tm_map(corpus,content_transformer(replace_abbreviation))
+  corpus <- tm_map(corpus, removePunctuation)
+  corpus <- tm_map(corpus, removeNumbers)
+  #Convert to lower case, tolower() is a base R function
+  corpus <- tm_map(corpus, content_transformer(tolower)) 
+  corpus <- tm_map(corpus, removeWords, custom_stop_words)
+  # Eliminating extra whitespace
+  corpus <- tm_map(corpus, stripWhitespace)
+  return(corpus)
+}
+
+# Now we have to apply the pre-processing tranformations to our corpus of documents:
+coffee_corpus_clean <- clean_corpus(coffee_corpus)
+chardonnay_corpus_clean <- clean_corpus(chardonnay_corpus)
+
+```
+
+ 3.1 Stemming
+Stemming is another useful preprocessing step. 
+It involves word stemming itself, which is a reduction of words to a root form and stem completion.
+stemDocument() function from tm package allows you to get to a word's root.
+stemCompletion() re-completes the words using completion dictionary as the reference corpus.
+ 
+### 4. Document Term/Term Document Matrix
+A common approach in text mining is to create a term-document matrix from a corpus. 
+Term-document matrix is the basis for bag of words text mining.
+TermDocumentMatrix() and DocumentTermMatrix() (depending on whether you want terms as rows and
+documents as columns, or vice versa) are used to create DTM/TDM.
+```{r Document Term/Term Document Matrix, message=FALSE, warning=FALSE}
+
+# creat DTM (documents in rows)
+coffee_dtm <- DocumentTermMatrix(coffee_corpus_clean)
+chardonnay_dtm <- DocumentTermMatrix(chardonnay_corpus_clean)
+
+# Convert DTMs to a matrix
+coffee_m <- as.matrix(coffee_dtm)
+chardonnay_m <- as.matrix(chardonnay_dtm)
+dim(coffee_m)
+# Review a portion of the matrix, take first 30 rows with terms "milk" and "black"
+coffee_m[1:30, c("milk","black")]
+
+# create TDM (terms in rows)
+coffee_tdm <- TermDocumentMatrix(coffee_corpus_clean)
+chardonnay_tdm <- TermDocumentMatrix(chardonnay_corpus_clean)
+
+# Convert TDMs to a matrix
+coffee_m_tdm <- as.matrix(coffee_tdm)
+chardonnay_m_tdm <- as.matrix(chardonnay_tdm)
+
+# Note coffee_m_tdm is a transposed version of coffee_m
+dim(coffee_m_tdm)
+
+coffee_m_tdm[c("milk","black"),1:30]
+```
+
+### 5. Frequent Terms
+
+Using coffee_m_tdm matrix (terms in rows, documents in columns) it is easy to calculate various statistics.
+Let's find the frequent terms using base R functions
+```{r frequent terms, message=FALSE, warning=FALSE}
+# Calculate the row sums of coffee_m_tdm
+coffee_term_frequency <- rowSums(coffee_m_tdm)
+
+# Sort coffee_term_frequency in decreasing order
+term_frequency <- sort(coffee_term_frequency, decreasing = TRUE)
+
+# Plot a barchart of the 10 most common words
+barplot(term_frequency[1:20], col = "blue", las = 2)
+
+```
+
+There is a fast way to get frequent terms without going through preprocessing steps.
+freq_terms() from qdap package. The function accepts a text variable:
+```{r frequent terms using freq_terms(), message=FALSE, warning=FALSE}
+# define a custom stopword dictionary
+custom_stop_words <- c(stopwords("english"), "coffee", "mug","chardonnay")
+
+term_frequency_qdap <- freq_terms(
+  coffee_tweets, # text source  
+  top = 20, # specify the top number of terms to show
+  at.least = 3, # the minimum character length of a word to be included
+  stopwords = custom_stop_words #a vector of stop words to remove
+)
+
+# Make a frequency barchart
+plot(term_frequency_qdap)
+```
+
+### 6. Word Cloud
+
+A word cloud is a visualization of terms. 
+In a word cloud, size is often scaled to frequency and the colors may indicate another measurement.
+To create a word cloud I will use wordcloud() function from wordcloud package.
+
+```{r word cloud for coffee terms, message=FALSE, warning=FALSE }
+# for word cloud we need term frequencies and term names 
+term_names <- names(coffee_term_frequency)
+
+# We can construct the cloud using three colors.
+# That will divide the term frequency into "low", "medium" and "high"
+wordcloud(term_names, 
+          coffee_term_frequency, 
+          max.words = 50, 
+          colors = c("grey80", "darkgoldenrod1","tomato"))
+
+```
+
+### 7. Visualize common words
+If I want to visualize common words across multiple documents, for example
+For example, for the marketing campaign how words in common can help understand similar brands features, etc.
+To visualize common words used in coffee and chardonnay tweets we can use commonality.cloud() function from wordcloud package.
+However, to do that, we need to create a new corpus with only two documents:
+one combining all tweets about coffee and the other combining all tweets about chardonnay.
+Remember our corpus "coffee_corpus_clean" and "chardonnay_corpus_clean" are composed of many individual tweets (1000 tweets). 
+We need to combine them into one document per subject.
+That can be done like that:
+ 1. paste() together all the tweets in each corpus along with the parameter collapse = " "
+This collapses all tweets (separated by a space) into a single vector.
+ 2. Finally create a single vector containing the two collapsed documents.
+
+```{r Visualize common words}
+# Create a char vector with two elements. 
+coffee_chardonnay <- c(paste(coffee_tweets,collapse = " "),
+                       paste(chardonnay_tweets,collapse = " "))
+
+# Convert to a vector source
+coffee_chardonnay_source <- VectorSource(coffee_chardonnay)
+
+# Create coffee_chardonnay_corpus
+coffee_chardonnay_corpus <- VCorpus(coffee_chardonnay_source)
+# As a result we have a corpus with two documents: one about coffee and the other about chardonnay.
+# Now let's clean this new corpus
+# Clean the corpus
+coffee_chardonnay_corpus <- clean_corpus(coffee_chardonnay_corpus)
+
+# Create coffee_chardonnay_tdm
+coffee_chardonnay_tdm <- TermDocumentMatrix(coffee_chardonnay_corpus)
+
+# Give the columns distinct names
+colnames(coffee_chardonnay_tdm) <- c("Coffee","Chardonnay")
+
+# Convert the TDM object to a matrix using as.matrix() for use in commonality.cloud() 
+coffee_chardonnay_m <- as.matrix(coffee_chardonnay_tdm)
+
+# Print a commonality cloud
+commonality.cloud(coffee_chardonnay_m, max.words = 100, colors = "steelblue1")
+```
+
+### 8. Comparing the frequencies of words
+
+To plot a cloud comparing the frequencies of words across documents.
+To do that use comparison.cloud() and the steps are similar to explained in "7. Visualize common words".
+I just re-use "coffee_chardonnay_m" matrix from "7. Visualize common words"
+```{r Visualize dissimilar words}
+
+comparison.cloud(coffee_chardonnay_m, max.words = 50, colors = c("orange", "blue"))
+
+```
+
+### 9. Pyramid plot: Polarized tag cloud
+
+In addition to words shared across documents, we might be interested in words
+that appear more commonly in one document compared to another.
+That can be done with a pyramid (opposed horizontal bar) plot produced by pyramid.plot() from the plotrix package.
+Some data manipulation is required to get a pyramid plot:
+ 1. Convert TDM matrix to a data frame with 3 columns:
+  1. The words contained in each document.
+  2. The counts of those words from document 1.
+  3. The counts of those words from document 2.
+Then execute this: 
+pyramid.plot(word_count_data$count1, word_count_data$count2, word_count_data$word)
+```{r Pyramid plot}
+top30_df <- coffee_chardonnay_m %>%
+  # Convert to data frame
+  as_data_frame(rownames = "word") %>% 
+  # Keep rows where word appears everywhere
+  filter_all(all_vars(. > 0)) %>% 
+  # Get difference in counts
+  mutate(difference = Chardonnay - Coffee) %>% 
+  # Keep rows with biggest difference
+  top_n(30, wt = difference) %>% 
+  # Arrange by descending difference
+  arrange(desc(difference))
+
+
+  pyramid.plot(
+  # Coffee counts
+  top30_df$Coffee, 
+  # Chardonnay counts
+  top30_df$Chardonnay, 
+  # Words
+  labels = top30_df$word, 
+  top.labels = c("Coffee", "Words", "Chardonnay"), 
+  main = "Words in Common", 
+  unit = NULL,
+  gap = 10,
+)
+```
+
+### 10. Word network
+
+Word networks is another way to view word connections. 
+Such network shows term association and cohesion (<https://en.wikipedia.org/wiki/Cohesion_(linguistics)>).
+Nodes represent individual terms, and the lines connecting the nodes are called edges and represent the connections between the terms.
+Below is a word network for words associated with "java":
+```{r}
+word_associate(coffee_tweets, match.string = "java", 
+               stopwords = c(Top200Words), 
+               network.plot = TRUE, cloud.colors = c("gray85", "darkred"))
+title(main = "Java Coffee Tweet Associations")
+```
+
