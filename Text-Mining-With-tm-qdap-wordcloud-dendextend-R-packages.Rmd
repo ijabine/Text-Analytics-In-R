@@ -22,7 +22,7 @@ including frequency counts of sentence types, words, sentences, turns of talk, s
 * [dendextend]: Extends 'dendrogram' functionality in R
 * [NLP]: Basic classes and methods for Natural Language Processing
 * [dplyr]
-
+* [RWeka]: 
 
 ### Key terms
  * Bag of words
@@ -36,6 +36,8 @@ including frequency counts of sentence types, words, sentences, turns of talk, s
  * Word clustering
  * Distance matrix
  * Word dendrogram
+ * Trigram (using RWeka)
+ * TfIdf
  
 ## Introduction
 
@@ -73,6 +75,7 @@ library(wordcloud)
 library(dendextend)
 library(plotrix)
 library(dplyr)
+library(RWeka)
 ```
 
 
@@ -80,8 +83,9 @@ library(dplyr)
 We are going to work with 2 twitter csv extracts: one about coffee and the other about chardonnay 
 ```{r Loading text files, message=FALSE, warning=FALSE}
 # important to use the argument stringsAsFactors = FALSE
-coffee <- read.csv("C:/Users/Illarion/Documents/R Projects/Text Analytics New/data/text_mining_using_tm/coffee.csv", stringsAsFactors = FALSE)
-chardonnay <- read.csv("C:/Users/Illarion/Documents/R Projects/Text Analytics New/data/text_mining_using_tm/chardonnay.csv", stringsAsFactors = FALSE)
+# Set JAVA_HOME, otherwise RWeka can't be loaded: Sys.setenv('JAVA_HOME' = 'C:/Program Files/Java/jre1.8.0_221/')
+coffee <- read.csv("https://raw.githubusercontent.com/ijabine/Text-Analytics-In-R/master/data/text_mining_using_tm/coffee.csv", stringsAsFactors = FALSE)
+chardonnay <- read.csv("https://raw.githubusercontent.com/ijabine/Text-Analytics-In-R/master/data/text_mining_using_tm/chardonnay.csv", stringsAsFactors = FALSE)
 
 # We are interested only in text columns, to isolate text from tweets:
 coffee_tweets <- coffee$text
@@ -359,5 +363,117 @@ word_associate(coffee_tweets, match.string = "java",
                stopwords = c(Top200Words), 
                network.plot = TRUE, cloud.colors = c("gray85", "darkred"))
 title(main = "Java Coffee Tweet Associations")
+```
+
+### 11. Word dendrogram
+
+We can apply a principle of Euclidian distance to word counts and display it as a dendrogram.
+As an input to the distance calculation I will use coffee_tdm, but we first we need to to limit the number of words in it.
+The problem is that TDM is a sparse matrix with mostly zeros.
+A good dendrogram is based on a TDM with 25 to 70 terms.
+To deal with sparsity I will have to run removeSparseTerms() from tm package.
+When using removeSparseTerms(), the sparse parameter will adjust the total terms kept in the TDM. 
+The closer sparse is to 1, the more terms are kept. This value represents a percentage cutoff of zeros for each term in the TDM.
+```{r Word dendrogram}
+# Remove sparsity
+
+coffee_tdm1 <- removeSparseTerms(coffee_tdm, sparse = 0.975)
+
+
+# Create coffee_tdm_m
+coffee_tdm_m <- as.matrix(coffee_tdm1)
+
+# Create tweets_dist
+coffee_dist <- dist(coffee_tdm_m)
+
+# Create hc
+hc <- hclust(coffee_dist)
+
+# Instead of using standard plot(hc) to print eye catching dendrogram, we can use dendextend package
+# First we have to create a dendrogram object:
+
+hcd <- as.dendrogram(hc)
+
+# Print the labels in hcd
+labels(hcd)
+
+# Change the branch color to red for "starbucks" and "think"
+hcd_colored <- branches_attr_by_labels(hcd, c("starbucks", "think"), "red")
+
+# Plot hcd
+plot(hcd_colored, main = "Coffee Dendrogram")
+
+# Add cluster rectangles, k = 4
+rect.dendrogram(hcd_colored, k = 4, border = "green")
+
+```
+
+
+### 12. Word association
+
+Word correlation can be considered as another way to think about word relationships.
+For any given word, findAssocs() from tm calculates its correlation with every other word in a TDM.
+The correlation score is between 0 and 1.
+A score of 1 means that two words always appear together in documents, while 0 means the terms rarely appear in the same document.
+The word association is done at the document level. So for every document that contains the word in question, the other terms in those specific docume.
+The function returns a list of all other terms that meet or exceed the minimum threshold.
+```{r Word association}
+
+associations <- findAssocs(coffee_tdm, "cup", 0.2)
+
+# Create associations_df
+associations_df <- list_vect2df(associations, col2 = "word", col3 = "score")
+
+
+# Plot the associations_df values
+ggplot(associations_df, aes(score, word)) + 
+  geom_point(size = 2)
+
+```
+
+### N-grams
+
+N-grams are a powerful way to explore text and useful derive phrases.
+For example, a bigram "not like" conveys a different message than "not" and "like" as two separate unigrams.
+N-grams  allow to extract useful phrases which lead to some additional insights or provide improved predictive attributes for a machine learning algorithm.
+To create n-grams I will use NGramTokenizer() from RWeka package:
+```{r N-grams using RWeka}
+
+# Make tokenizer function to create trigrams
+tokenizer <- function(x) {
+  NGramTokenizer(x, Weka_control(min = 3, max = 3))
+}
+
+# Pass tokenizer() function into the TermDocumentMatrix or DocumentTermMatrix functions as an additional parameter:
+
+trigram_dtm <- DocumentTermMatrix(
+  coffee_corpus_clean, 
+  control = list(tokenize = tokenizer)
+)
+
+```
+
+### TfIdf (term frequency-inverse document frequency ) as frequency weights
+
+TfIdf counts terms (i.e. Tf), normalizes the value by document length, and then penalizes the value the more often a word appears among the documents.
+If a word is commonplace it's important but not insightful, it's penalized and captured by IDF.
+For example, a term coffee appears almost in all documents, so with document frequency weighting it is expected to be informative. However in TfIdf, "coffee" is penalized because it appears in all the documents. As a result "coffee" isn't considered novel so its value is reduced towards 0 which lets other terms have higher values for analysis.
+Using Tf-Idf, terms that are important in specific documents have a higher score.
+```{r}
+# Let's see a part of TDM created with frequency weighting
+coffee_m_tdm[c("starbucks", "day"),1:50]
+
+# Create a TDM with tfidf weighting
+coffee_tdm_tfidf <- TermDocumentMatrix(
+  coffee_corpus_clean, 
+  control = list(weighting = weightTfIdf)
+)
+
+# Convert to matrix
+coffee_m_tdm_tfidf <- as.matrix(coffee_tdm_tfidf)
+
+# Examine the same part and compare with frequency weighting:
+coffee_m_tdm_tfidf[c("starbucks", "day"),1:50]
+
 ```
 
