@@ -1,0 +1,209 @@
+---
+title: 'Text Regular Expressions'
+author: "Illarion  Jabine"
+date: "09/04/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+
+### 1. Required packages:
+
+ * strinr: Simple, Consistent Wrappers for Common String Operations
+
+### 2. Cheatsheet
+
+1. Character classes
+  .	any character except newline
+  \w\d\s	word, digit, whitespace
+  \W\D\S	not word, digit, whitespace
+  [abc]	any of a, b, or c
+  [^abc]	not a, b, or c
+  [a-g]	character between a & g
+
+2. Anchors 
+  ^abc$	start / end of the string
+  \\b \\B	word, not-word boundary
+
+3. Escape characters
+ \\. \\* \\	escaped special characters
+ \\t \\n \\r	tab, linefeed, carriage return
+
+4. Groups and Lookaround
+ (abc)	capture group
+ \1	backreference to group #1
+ (?:abc)	non-capturing group
+ (?=abc)	positive lookahead
+ (?!abc)	negative lookahead
+
+5. Quantifiers and alternation
+ a* a+ a?	0 or more, 1 or more, 0 or 1
+ a{5} a{2,}	exactly five, two or more
+ a{1,3}	between one & three
+ a+? a{2,}?	match as few as possible
+ ab|cd	match ab or cd
+
+### 3. Useful Links
+ $ <https://r4ds.had.co.nz/strings.html>
+ $ <https://stringr.tidyverse.org/articles/regular-expressions.html>
+ 
+## 4. Introduction
+Regular expressions are widely used in manipulating (parsing/replacing strings) text and extracting information from it.
+
+### 5. Load the libraries
+Let's first load the libraries.
+```{r loading packages, message=FALSE, warning=FALSE}
+library(stringr)
+```
+
+### 6. Loading and checking the data
+
+Load and check the datasets.
+Dataset1: movie_titles
+
+```{r load the data and pre-process them}
+# Loading data from Rds file
+movie_titles <- c("Karate Kid","The Twilight Saga: Eclispe","Knight & Day","Shrek Forever After 3D","Marmaduke.","Street Dance","Predators","StreetDance 3D","Robin Hood","Micmacs A Tire-Larigot","50 Shades of Grey","Sex And the City 2","Inception","The Dark Knight","300","Toy Story 3 In Disney Digital 3D","50 Shades of Gray","Italien, Le","Tournee","The A-Team","El Secreto De Sus Ojos","Kiss & Kill","The Road","Cosa Voglio Di Piu","Nur für dich","Prince Of Persia: The Sands Of Time","Saw 4","Saw 5","Saw 6","21 Grams")
+```
+
+### 7. Special characters
+
+Special character --> Meaning
+^ --> Caret: Marks the beginning of a line or string ("starts with")
+$ --> Dollar Sign: Marks the end of a line or string ("ends with")
+. --> Period: Matches anything: letters, numbers or white spaces
+\\. --> Two backslashes: Escapes the period when we search an actual period
+
+Control characters:
+ * \n: line feed
+ * \r: carriage return 
+ * \t: horizontal tabulation
+
+```{r}
+# Will match first two chars at the beginning. When creating a pattern to look for something at the beginning of a line, use the caret followed by a search term.
+string <- c("This is a text string.","This is another text string","Some text?")
+str_match(string, "^..")
+
+# The period matches any character, it's like a wild card. Example, using three dots "..." will find three characters - be it letters or numbers or white spaces.
+
+
+# Match all sequels of the movie "Saw"
+str_match(movie_titles, pattern = "Saw..")
+
+# Will match strings with "T" at the beginning
+str_match(string, "^T")
+
+# str_view_all() shows all the matches
+str_view_all(movie_titles,"^The")
+
+# Will match strings with "." at the end. When looking for something at the end, type the search term first and then append the dollar sign.
+str_match(string, "\\.$")
+
+# str_detect() returns TRUE if the pattern matches and FALSE otherwise, good for indexing.
+str_detect("This is text","t$")
+
+# List all movies that end with "3D"
+movie_titles[str_detect(movie_titles,pattern = "3D$")]
+
+```
+
+
+### 8. Character Classes
+
+ * \\d matches any digit: 0, 1, 2, 3,...
+   The complement, \D, matches any character that is not a decimal digit.
+
+ * \\w matches any “word” character, which includes alphabetic characters, marks and decimal numbers a, b, c, 1, 2, 3,...
+ The complement, \W, matches any non-word character.
+ 
+ * \s: matches any whitespace. This includes tabs, newlines, form feeds
+ The complement, \\S, matches any non-whitespace character.
+
+Your own character classes can be created using []:
+
+[A-Za-z]: matches every character between A and Z and between a and z.
+[abc]: matches a, b, or c.
+[^abc]: matches anything except a, b, or c. A caret ^ inside the square brackets [^...] will invert the selection inside the brackets.
+
+There are a number of pre-built classes that you can use inside []:
+[:punct:]: punctuation.
+[:alpha:]: letters.
+[:lower:]: lowercase letters.
+[:upper:]: upperclass letters.
+[:digit:]: digits.
+[:xdigit:]: hex digits.
+[:alnum:]: letters and numbers.
+[:cntrl:]: control characters.
+[:graph:]: letters, numbers, and punctuation.
+[:print:]: letters, numbers, punctuation, and whitespace.
+[:space:]: space characters (basically equivalent to \s).
+[:blank:]: space and tab.
+
+
+```{r}
+# Matches movies with digits
+movie_titles[str_detect(movie_titles,"\\d")]
+
+# matches all containg digits OR letter s
+movie_titles[str_detect(movie_titles,"[s\\d]")]
+
+# matches punctuation and upperclass letters
+movie_titles[str_detect(movie_titles,"[:punct:][:upper:]")]
+
+# List all movies that contain "Grey" or "Gray"
+movie_titles[str_detect(movie_titles,"Gr[ae]y")]
+```
+
+
+### 9. Alternation with pipe and question mark
+
+By connecting multiple words with a pipe operator | you both match words before the pipe and after. You can chain as many words as you like. 
+By using parentheses you can group certain words together.
+
+```{r}
+str_detect(c("abc", "def", "ghi"), "abc|def")
+# will return: [1]  TRUE  TRUE FALSE
+
+# parentheses are used to override the default precedence rules:
+movies <- c("Karate Kid 2, Distributor: Columbia, 58 Screens","Finding Nemo, Distributors: Pixar and Disney, 10 Screens","Finding Harmony, Distributor: Unknown, 1 Screen","Finding Dory, Distributors: Pixar and Disney, 8 Screens")
+
+# these two lines of code will return different results
+str_view(movies,"Finding Nemo|Harmony|Dory")
+
+str_view(movies,"Finding (Nemo|Harmony|Dory)")
+
+str_match(movies,"Finding (Nemo|Harmony|Dory)")
+```
+
+Question mark ? makes the preceding group or character optional, causing a regular expression to match even if a certain part of the pattern is missing. 
+```{r}
+# Match both Screen and Screens by making the last "s" optional
+str_view_all(movies, pattern = "Screens?")
+```
+
+### 10. Repetition
+
+The repetition operators control how many times a pattern matches:
+?: 0 or 1.
++: 1 or more.
+*: 0 or more.
+
+To specify the number of matches precisely use {}:
+{n}: exactly n
+{n,}: n or more
+{n,m}: between n and m
+abc*        matches a string that has ab followed by zero or more c
+abc+        matches a string that has ab followed by one or more c
+abc?        matches a string that has ab followed by zero or one c
+abc{2}      matches a string that has ab followed by 2 c
+abc{2,}     matches a string that has ab followed by 2 or more c
+abc{2,5}    matches a string that has ab followed by 2 up to 5 c
+a(bc)*      matches a string that has a followed by zero or more copies of the sequence bc
+a(bc){2,5}  matches a string that has a followed by 2 up to 5 copies of the sequence bc
